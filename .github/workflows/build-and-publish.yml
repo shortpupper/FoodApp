@@ -1,0 +1,55 @@
+name: Build and Publish
+
+on:
+  push:
+    branches:
+      - main # adjust this to your main branch name
+
+jobs:
+  build:
+    name: Build Android and iOS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14.x' # adjust this to the version required by your React Native project
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Android APK
+        run: npx react-native run-android --variant=release
+
+      - name: Build iOS IPA
+        run: npx react-native run-ios --configuration=Release
+
+  publish:
+    needs: build
+    name: Publish to GitHub Releases
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14.x' # adjust this to the version required by your React Native project
+
+      - name: Install GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list
+          apt update
+          apt install gh
+
+      - name: Create a new GitHub Release
+        run: |
+          gh release create v1.0.0 --title "Release v1.0.0" --notes "Release notes for version 1.0.0" --draft
+
