@@ -1,55 +1,73 @@
-name: Build and Publish
+name: React Native Build and Publish
 
 on:
   push:
     branches:
-      - main # adjust this to your main branch name
+      - main
 
 jobs:
-  build:
-    name: Build Android and iOS
+  build-and-publish:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        node-version: [14.x, 16.x]
+    env:
+      NODE_ENV: production
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v3
 
       - name: Setup Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
         with:
-          node-version: '14.x' # adjust this to the version required by your React Native project
+          node-version: ${{ matrix.node-version }}
 
-      - name: Install dependencies
+      - name: Cache npm dependencies
+        uses: actions/cache@v2
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        if: success()
+
+      - name: Install npm dependencies
         run: npm install
 
-      - name: Build Android APK
-        run: cd android && ./gradlew assembleRelease
-
-      - name: Build iOS IPA
-        run: npx react-native run-ios --configuration=Release
-
-  publish:
-    needs: build
-    name: Publish to GitHub Releases
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v2
+      - name: Install Java (for Android build)
+        uses: actions/setup-java@v3
         with:
-          node-version: '14.x' # adjust this to the version required by your React Native project
+          java-version: "11"
+          distribution: "zulu"
 
-      - name: Install GitHub CLI
+      - name: Install CocoaPods (for iOS build)
+        run: sudo gem install cocoapods
+
+      - name: Make gradlew executable (for Android build)
+        run: chmod +x ./android/gradlew
+
+      - name: Bundle RN Android assets
+        run: npx react-native bundle --platform android --dev false --entry-file Main.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res
+      - name: Clean up Android resources
+        run: rm -rf ./android/app/src/main/res/drawable-* && rm -rf ./android/app/src/main/res/raw
+
+      - name: Build Android APK
+        run: cd ./android && ./gradlew clean app:assembleRelease -x bundleReleaseJsAndAssets
+
+      - name: Archive iOS build
         run: |
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list
-          apt update
-          apt install gh
+          cd ios && pod install && xcodebuild archive -workspace FoodApp.xcworkspace -scheme FoodApp -archivePath FoodApp.xcarchive
 
-      - name: Create a new GitHub Release
+      - name: Export iOS IPA
         run: |
-          gh release create v1.0.0 --title "Release v1.0.0" --notes "Release notes for version 1.0.0" --draft
+          xcodebuild -exportArchive -archivePath FoodApp.xcarchive -exportOptionsPlist exportOptions.plist -exportPath ./
 
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: android-app-release.apk
+          path: android/app/build/outputs/apk/release/
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: ios-app-release.ipa
+          path: FoodApp.ipa
